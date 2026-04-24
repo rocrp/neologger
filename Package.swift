@@ -14,6 +14,7 @@ let package = Package(
     .library(name: "NeoLogger", targets: ["NeoLogger"]),
     .library(name: "NeoLoggerSwiftLog", targets: ["NeoLoggerSwiftLog"]),
     .executable(name: "neo-logger-viewer", targets: ["neo-logger-viewer"]),
+    .executable(name: "neo-logger-demo", targets: ["neo-logger-demo"]),
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0")
@@ -38,6 +39,13 @@ let package = Package(
     ),
     .executableTarget(
       name: "neo-logger-viewer",
+      dependencies: ["NeoLogger"],
+      swiftSettings: [
+        .swiftLanguageMode(.v6)
+      ]
+    ),
+    .executableTarget(
+      name: "neo-logger-demo",
       dependencies: ["NeoLogger"],
       swiftSettings: [
         .swiftLanguageMode(.v6)
