@@ -49,12 +49,10 @@ enum DemoCLI {
       while !Task.isCancelled {
         i += 1
         await logger.log(.app, .info, "heartbeat #\(i) at \(Date())")
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        try await Task.sleep(for: .seconds(1))
       }
     } else {
       await logger.flush()
-      // Give Network.framework a moment to push the final bytes before exit.
-      try await Task.sleep(nanoseconds: 200_000_000)
       print("[demo] sent. bye.")
     }
   }

@@ -57,6 +57,22 @@ let log = Logger(label: "MyApp.Network")
 log.info("request completed", metadata: ["status": "200"])
 ```
 
+## Custom transports
+
+`NeoLogger` sends through a one-method seam:
+
+```swift
+public protocol LogTransport: Sendable {
+  func send(_ message: Message) async throws
+}
+```
+
+`send` suspends until the message is handed off and acknowledged; the adapter owns reconnection, wire encoding, and the client-info handshake. `NWTransport` is the default adapter (Bonjour/TLS/reconnect). Inject your own for tests or other sinks:
+
+```swift
+let logger = NeoLogger(configuration: .init(), transport: MyTransport())
+```
+
 ## Viewer
 
 This package also bundles a tiny CLI viewer — handy for tests and for running without the full NSLogger.app:
@@ -79,7 +95,7 @@ The encoder and decoder are pure value types, so the protocol can be reused in t
 swift test
 ```
 
-Seven tests cover wire roundtrip, framing, split-stream delivery, incomplete-frame handling, and a live end-to-end send through Network.framework.
+Fourteen tests cover the wire codec (roundtrip, framing, split streams, incomplete frames), the client actor through an in-process transport (ordering, drop-oldest buffering, requeue-on-failure, the flush contract), and the `NWTransport` adapter over local sockets (handshake-first, reconnection with handshake replay, delivery after a viewer drop).
 
 ## Status
 

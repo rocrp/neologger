@@ -11,9 +11,10 @@ swift test
 Covers:
 
 - **WireProtocolTests** — encode/decode roundtrip, big-endian framing, split byte streams, incomplete frames, `ClientInfo` builder.
-- **EndToEndTests** — spins up a real `NWListener` on a free port, routes a `NeoLogger` client at it over loopback, asserts CLIENTINFO + a log frame arrive and decode byte-for-byte.
+- **NeoLoggerActorTests** — the client actor through an in-process `RecordingTransport`: ordering + sequence, drop-oldest buffering (in-flight message never evicted), requeue when the transport throws, and `flush()` waiting for the in-flight ack.
+- **NWTransportTests** — the `NWTransport` adapter over loopback sockets on a system-assigned port: handshake precedes the first frame, reconnection replays the handshake after the viewer drops the connection, `flush()` through the real transport, and delivery of a single post-drop log on a fresh connection.
 
-No external processes needed. Runs in ~20 ms on an M-series Mac.
+No external processes needed. Runs in under a second on an M-series Mac.
 
 ## 2. Two-terminal smoke test
 

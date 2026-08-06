@@ -71,22 +71,37 @@ extension ClientInfo {
 /// A modern Swift NSLogger-compatible client.
 ///
 /// Calls are non-blocking: `log(...)` returns immediately after enqueuing.
-/// A background task drains the queue and flushes frames once the transport
-/// is ready. Logs generated before a connection exists are buffered in memory.
+/// A background task drains the queue into the transport, which owns the
+/// connection, wire encoding, and the client-info handshake. Messages
+/// enqueued while the viewer is unreachable stay buffered (oldest dropped
+/// beyond `maxBufferedMessages`); the in-flight message is never dropped.
 public actor NeoLogger {
   /// Shared instance. You may create your own `NeoLogger` instances as well.
   public static let shared = NeoLogger()
 
-  private let transport: NWTransport
-  private var config: NeoLoggerConfiguration
+  private let transport: any LogTransport
+  private let config: NeoLoggerConfiguration
   private var sequence: Int32 = 0
   private var pending: [Message] = []
+  private var inFlight = false
   private var drainTask: Task<Void, Never>?
-  private var hasSentClientInfo = false
+  private var flushWaiters: [CheckedContinuation<Void, Never>] = []
 
+  /// Creates a logger backed by the Network.framework transport.
   public init(configuration: NeoLoggerConfiguration = NeoLoggerConfiguration()) {
+    self.init(
+      configuration: configuration,
+      transport: NWTransport(endpoint: configuration.endpoint, clientInfo: configuration.clientInfo)
+    )
+  }
+
+  /// Creates a logger that sends through the given transport.
+  public init(
+    configuration: NeoLoggerConfiguration = NeoLoggerConfiguration(),
+    transport: any LogTransport
+  ) {
     self.config = configuration
-    self.transport = NWTransport(endpoint: configuration.endpoint)
+    self.transport = transport
   }
 
   // MARK: Public API
@@ -162,10 +177,12 @@ public actor NeoLogger {
     enqueue(.mark(seq: nextSeq(), text: text))
   }
 
-  /// Wait for buffered messages to be written to the transport.
+  /// Wait until every message accepted before this call has been handed to
+  /// the transport and acknowledged. May wait indefinitely while no viewer
+  /// is reachable; race with a timeout if you need a bound.
   public func flush() async {
-    while !pending.isEmpty, !Task.isCancelled {
-      try? await Task.sleep(nanoseconds: 10_000_000)
+    while !(pending.isEmpty && !inFlight) {
+      await withCheckedContinuation { flushWaiters.append($0) }
     }
   }
 
@@ -180,7 +197,7 @@ public actor NeoLogger {
   }
 
   private func ensureDrainTaskRunning() {
-    if drainTask == nil || drainTask?.isCancelled == true {
+    if drainTask == nil {
       drainTask = Task { [weak self] in
         await self?.drain()
       }
@@ -189,25 +206,25 @@ public actor NeoLogger {
 
   private func drain() async {
     while !pending.isEmpty {
+      let message = pending.removeFirst()
+      inFlight = true
       do {
-        try await transport.waitUntilReady()
-        if !hasSentClientInfo {
-          let frame = WireEncoder.encode(.clientInfo(info: config.clientInfo))
-          try await transport.send(frame)
-          hasSentClientInfo = true
-        }
-        while !pending.isEmpty {
-          let msg = pending.removeFirst()
-          let frame = WireEncoder.encode(msg)
-          try await transport.send(frame)
-        }
+        try await transport.send(message)
+        inFlight = false
       } catch {
-        // Transport is down. Back off and retry; messages stay buffered.
-        hasSentClientInfo = false
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        // Terminal transport failure (stopped/cancelled): keep the message
+        // for a future drain rather than dropping it.
+        inFlight = false
+        pending.insert(message, at: 0)
+        break
       }
     }
     drainTask = nil
+    if pending.isEmpty {
+      let waiters = flushWaiters
+      flushWaiters.removeAll()
+      for waiter in waiters { waiter.resume() }
+    }
   }
 
   private func nextSeq() -> Int32 {
