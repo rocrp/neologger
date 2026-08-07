@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 
 /// Viewer-side counterpart of `NWTransport`: accepts client connections,
 /// optionally advertises over Bonjour, decodes arriving Frames, and yields
@@ -20,6 +21,9 @@ public actor NWMessageListener {
 
   public enum ListenerError: Error, Sendable {
     case invalidPort(UInt16)
+    /// The supplied `SecIdentity` could not be used for TLS (typically a
+    /// certificate without a usable private key).
+    case unusableTLSIdentity
   }
 
   public nonisolated let events: AsyncStream<Event>
@@ -29,6 +33,7 @@ public actor NWMessageListener {
   private let requestedPort: UInt16?
   private let serviceName: String?
   private let serviceType: String
+  private let tlsIdentity: SecIdentity?
   private var listener: NWListener?
   private var connections: [Int: NWConnection] = [:]
   private var decoders: [Int: WireDecoder] = [:]
@@ -37,14 +42,18 @@ public actor NWMessageListener {
   /// - Parameters:
   ///   - port: TCP port to bind, or nil for a system-assigned one.
   ///   - serviceName: advertise over Bonjour under this name when non-nil.
+  ///   - tlsIdentity: serve TLS using this identity. NSLogger viewers use a
+  ///     self-signed certificate, which `NWTransport` accepts unconditionally.
   public init(
     port: UInt16? = nil,
     serviceName: String? = nil,
-    serviceType: String = TransportEndpoint.plainServiceType
+    serviceType: String = TransportEndpoint.plainServiceType,
+    tlsIdentity: SecIdentity? = nil
   ) {
     self.requestedPort = port
     self.serviceName = serviceName
     self.serviceType = serviceType
+    self.tlsIdentity = tlsIdentity
     let pipe = AsyncStream.makeStream(of: Event.self)
     self.events = pipe.stream
     self.eventContinuation = pipe.continuation
@@ -52,14 +61,15 @@ public actor NWMessageListener {
 
   /// Starts listening; returns the bound port.
   public func start() async throws -> UInt16 {
+    let parameters = try makeParameters()
     let listener: NWListener
     if let requestedPort {
       guard let nwPort = NWEndpoint.Port(rawValue: requestedPort) else {
         throw ListenerError.invalidPort(requestedPort)
       }
-      listener = try NWListener(using: .tcp, on: nwPort)
+      listener = try NWListener(using: parameters, on: nwPort)
     } else {
-      listener = try NWListener(using: .tcp)
+      listener = try NWListener(using: parameters)
     }
     if let serviceName {
       listener.service = NWListener.Service(name: serviceName, type: serviceType)
@@ -102,6 +112,16 @@ public actor NWMessageListener {
   }
 
   // MARK: - Internals
+
+  private func makeParameters() throws -> NWParameters {
+    guard let tlsIdentity else { return .tcp }
+    guard let identity = sec_identity_create(tlsIdentity) else {
+      throw ListenerError.unusableTLSIdentity
+    }
+    let tls = NWProtocolTLS.Options()
+    sec_protocol_options_set_local_identity(tls.securityProtocolOptions, identity)
+    return NWParameters(tls: tls)
+  }
 
   private func accept(_ connection: NWConnection) {
     let id = nextConnectionID

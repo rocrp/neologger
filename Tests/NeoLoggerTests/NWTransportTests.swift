@@ -91,6 +91,40 @@ struct NWTransportTests {
     await listener.stop()
   }
 
+  /// Covers the TLS branch — `sec_protocol_options_set_verify_block` accepting
+  /// a viewer's self-signed certificate, which no real NSLogger viewer ever
+  /// backs with a trusted chain.
+  ///
+  /// Needs macOS 15 for a keychain-free PKCS#12 import; below that the fixture
+  /// would leave a certificate and private key in the user's keychain on every
+  /// run, so the test opts out instead.
+  @Test(
+    .timeLimit(.minutes(1)),
+    .enabled(
+      if: supportsKeychainFreePKCS12Import,
+      "needs macOS 15+ for a keychain-free PKCS#12 import"))
+  @available(macOS 15.0, iOS 18.0, *)
+  func connectsOverTLSToAViewerServingASelfSignedCertificate() async throws {
+    let listener = NWMessageListener(tlsIdentity: try makeSelfSignedTLSIdentity())
+    let port = try await listener.start()
+    let events = observe(listener)
+
+    let transport = NWTransport(
+      endpoint: .host(name: "127.0.0.1", port: port, useTLS: true),
+      clientInfo: testClientInfo,
+      retryDelay: .milliseconds(50)
+    )
+    try await transport.send(
+      .log(seq: 1, threadId: "t", domain: "Test", level: 0, payload: .text("over tls")))
+
+    try await eventually { await events.messages(on: 0).count >= 2 }
+    let messages = await events.messages(on: 0)
+    #expect(messages.first?.type == .clientInfo)
+    #expect(messages.compactMap(\.text).contains("over tls"))
+    await transport.stop()
+    await listener.stop()
+  }
+
   /// Regression: the viewer's cancel() is a graceful FIN, and an idle client
   /// connection stays .ready — without the peer-close monitor the next send
   /// is accepted into the dead socket and silently lost (and pre-seam code
