@@ -46,31 +46,44 @@ struct NeoLoggerActorTests {
     )
   }
 
-  @Test func deliversInOrderWithIncreasingSequence() async throws {
+  @Test func syncCallsArriveInCallOrderWithContiguousSequence() async throws {
     let transport = RecordingTransport()
     let logger = makeLogger(transport: transport)
-    await logger.log(.app, .info, "a")
-    await logger.log(.app, .info, "b")
-    await logger.log(.app, .info, "c")
+    for i in 1...200 {
+      logger.log(.app, .info, "m\(i)")
+    }
     await logger.flush()
 
     let sent = await transport.sent
-    #expect(sent.compactMap(\.text) == ["a", "b", "c"])
-    let seqs = sent.compactMap(\.seq)
-    #expect(seqs == seqs.sorted())
-    #expect(Set(seqs).count == 3)
+    #expect(sent.compactMap(\.text) == (1...200).map { "m\($0)" })
+    #expect(sent.compactMap(\.seq) == (1...200).map(Int32.init))
+  }
+
+  @Test func capturesTheCallersThreadLabel() async throws {
+    let transport = RecordingTransport()
+    let logger = makeLogger(transport: transport)
+    let thread = Thread {
+      logger.log(.app, .info, "from a named thread")
+    }
+    thread.name = "worker-7"
+    thread.start()
+    try await eventually { await !transport.sent.isEmpty }
+    await logger.flush()
+    #expect(await transport.sent.first?.threadId == "worker-7")
   }
 
   @Test func dropsOldestBeyondBufferLimitButNeverTheInFlightMessage() async throws {
     let transport = RecordingTransport(mode: .gated)
     let logger = makeLogger(transport: transport, maxBuffered: 4)
 
-    await logger.log(.app, .info, "m1")
+    logger.log(.app, .info, "m1")
     // Wait until m1 is in flight (parked inside the gated transport) so the
     // buffer arithmetic below is deterministic.
     try await eventually { await transport.attempts == 1 }
 
-    for i in 2...6 { await logger.log(.app, .info, "m\(i)") }
+    for i in 2...6 {
+      logger.log(.app, .info, "m\(i)")
+    }
     await transport.set(mode: .open)
     await logger.flush()
 
@@ -82,11 +95,11 @@ struct NeoLoggerActorTests {
     let transport = RecordingTransport(mode: .failing)
     let logger = makeLogger(transport: transport)
 
-    await logger.log(.app, .info, "x")
+    logger.log(.app, .info, "x")
     try await eventually { await transport.attempts >= 1 }
 
     await transport.set(mode: .open)
-    await logger.log(.app, .info, "y")  // restarts the drain
+    logger.log(.app, .info, "y")  // kicks a fresh drain
     await logger.flush()
 
     #expect(await transport.sent.compactMap(\.text) == ["x", "y"])
@@ -95,7 +108,7 @@ struct NeoLoggerActorTests {
   @Test func flushWaitsUntilTheInFlightSendIsAcknowledged() async throws {
     let transport = RecordingTransport(mode: .gated)
     let logger = makeLogger(transport: transport)
-    await logger.log(.app, .info, "x")
+    logger.log(.app, .info, "x")
 
     let done = Flag()
     let flusher = Task {
@@ -109,5 +122,21 @@ struct NeoLoggerActorTests {
     await flusher.value
     #expect(await done.value)
     #expect(await transport.sent.count == 1)
+  }
+
+  @Test func severityShortcutsCoverAllSevenLevels() async throws {
+    let transport = RecordingTransport()
+    let logger = makeLogger(transport: transport)
+    logger.error("e")
+    logger.warning("w")
+    logger.important("im")
+    logger.info("i")
+    logger.debug("d")
+    logger.verbose("v")
+    logger.noise("n")
+    await logger.flush()
+
+    let levels = await transport.sent.compactMap(\.level)
+    #expect(levels == [.error, .warning, .important, .info, .debug, .verbose, .noise])
   }
 }

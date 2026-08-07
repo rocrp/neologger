@@ -16,10 +16,22 @@ public struct Level: RawRepresentable, Sendable, Hashable {
   public static let verbose = Level(rawValue: 5)
   public static let noise = Level(rawValue: 6)
 
-  public static func custom(_ value: Int32) -> Level { Level(rawValue: value) }
+  /// Short display name matching the NSLogger viewer's level column.
+  public var name: String {
+    switch rawValue {
+    case 0: "ERROR"
+    case 1: "WARN"
+    case 2: "IMPO"
+    case 3: "INFO"
+    case 4: "DEBUG"
+    case 5: "VERB"
+    case 6: "NOISE"
+    default: "L\(rawValue)"
+    }
+  }
 }
 
-/// A logical grouping tag (maps to NSLogger's tag/domain field).
+/// A logical grouping label (maps to NSLogger's tag field on the wire).
 public struct Domain: RawRepresentable, Sendable, Hashable, ExpressibleByStringLiteral {
   public let rawValue: String
   public init(rawValue: String) { self.rawValue = rawValue }
@@ -36,6 +48,4 @@ public struct Domain: RawRepresentable, Sendable, Hashable, ExpressibleByStringL
   public static let cache: Domain = "Cache"
   public static let db: Domain = "DB"
   public static let io: Domain = "IO"
-
-  public static func custom(_ value: String) -> Domain { Domain(rawValue: value) }
 }

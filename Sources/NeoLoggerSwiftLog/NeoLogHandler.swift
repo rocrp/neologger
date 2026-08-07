@@ -34,16 +34,14 @@ public struct NeoLogHandler: LogHandler {
       ? event.message.description
       : "\(event.message.description) \(Self.formatMetadata(merged))"
 
-    let neoLevel = Self.map(event.level)
-    let domain = Domain(rawValue: label)
-    let lineInt = Int(clamping: event.line)
-    let file = event.file
-    let function = event.function
-    let client = self.client
-
-    Task.detached(priority: .utility) {
-      await client.log(domain, neoLevel, text, file: file, line: lineInt, function: function)
-    }
+    client.log(
+      Domain(rawValue: label),
+      Self.map(event.level),
+      text,
+      file: event.file,
+      line: Int(clamping: event.line),
+      function: event.function
+    )
   }
 
   private static func map(_ level: Logger.Level) -> Level {

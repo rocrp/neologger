@@ -10,13 +10,6 @@ public enum TransportEndpoint: Sendable, Hashable {
 }
 
 extension TransportEndpoint {
-  public var useTLS: Bool {
-    switch self {
-    case .bonjour(_, let tls): tls
-    case .host(_, _, let tls): tls
-    }
-  }
-
   /// Bonjour service types used by the NSLogger viewer.
   public static let plainServiceType = "_nslogger._tcp"
   public static let sslServiceType = "_nslogger-ssl._tcp"

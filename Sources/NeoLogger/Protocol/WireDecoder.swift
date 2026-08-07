@@ -8,22 +8,33 @@ public struct WireDecoder: Sendable {
   public enum DecodeError: Error, Sendable {
     case truncated
     case unsupportedPartType(UInt8)
-    case partSizeTooLarge(UInt32)
+    /// The frame header announced more bytes than `maxFrameBytes` — a
+    /// corrupt or hostile length prefix; decoding must stop rather than
+    /// buffer unbounded memory.
+    case frameTooLarge(UInt32)
   }
+
+  /// Upper bound on a single frame's announced size.
+  public var maxFrameBytes: Int
 
   private var buffer: Data = .init()
 
-  public init() {}
+  public init(maxFrameBytes: Int = 64 << 20) {
+    self.maxFrameBytes = maxFrameBytes
+  }
 
   public mutating func append(_ data: Data) {
     buffer.append(data)
   }
 
   /// Returns the next complete message in the buffer, or nil if more bytes are needed.
-  /// Throws on malformed framing (unknown part type, etc).
+  /// Throws on malformed framing (oversized frame, unknown part type, etc).
   public mutating func nextMessage() throws -> Message? {
     guard buffer.count >= 4 else { return nil }
     let totalSize = readUInt32(at: 0)
+    guard Int(totalSize) <= maxFrameBytes else {
+      throw DecodeError.frameTooLarge(totalSize)
+    }
     let needed = 4 + Int(totalSize)
     guard buffer.count >= needed else { return nil }
 
@@ -34,6 +45,8 @@ public struct WireDecoder: Sendable {
     return try decode(body: body)
   }
 
+  // `body` must be 0-based (fresh from `subdata`): byte reads below mix
+  // `startIndex + cursor` with absolute-range `subdata` calls.
   private func decode(body: Data) throws -> Message {
     var cursor = 0
     guard cursor + 2 <= body.count else { throw DecodeError.truncated }

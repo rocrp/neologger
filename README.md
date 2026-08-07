@@ -27,13 +27,16 @@ Targets pick one of:
 ```swift
 import NeoLogger
 
-// 1. Fire-and-forget from sync code (recommended for app code).
+// Every logging call is synchronous, non-blocking, and call-ordered.
+// `NeoLog` is shorthand for `NeoLogger.shared`.
 NeoLog.info(.network, "Checking paper level…")
 NeoLog.error(.db, "migration failed: \(error)")
+NeoLog.warning("works without a domain too")
 
-// 2. Or drive the actor directly for full control.
-await NeoLogger.shared.log(.view, .debug, "hello")
-await NeoLogger.shared.flush()
+// Own instance + waiting for delivery:
+let logger = NeoLogger()
+logger.log(.view, .debug, "hello")
+await logger.flush()  // suspends until every accepted message is acked
 ```
 
 By default, `NeoLogger.shared` browses Bonjour for `_nslogger._tcp`. Point at a specific host:
@@ -42,7 +45,7 @@ By default, `NeoLogger.shared` browses Bonjour for `_nslogger._tcp`. Point at a 
 let logger = NeoLogger(configuration: .init(
     endpoint: .host(name: "192.168.1.20", port: 50000, useTLS: false)
 ))
-await logger.log(.app, .info, "launched")
+logger.log(.app, .info, "launched")
 ```
 
 ## swift-log bridge
@@ -78,16 +81,17 @@ let logger = NeoLogger(configuration: .init(), transport: MyTransport())
 This package also bundles a tiny CLI viewer — handy for tests and for running without the full NSLogger.app:
 
 ```bash
-swift run neo-logger-viewer
+swift run neo-logger-viewer            # listens on :50000
+swift run neo-logger-viewer 50123      # or any port
 ```
 
-It listens on `:50000`, advertises `_nslogger._tcp`, decodes arriving frames and prints one line per message. Real clients built with this library (or the original NSLogger) connect automatically via Bonjour.
+It advertises `_nslogger._tcp`, decodes arriving frames and prints one line per message. Real clients built with this library (or the original NSLogger) connect automatically via Bonjour. The listening/decoding half lives in the library as `NWMessageListener` — the executable is just the print format.
 
 ## Wire format
 
 `NeoLogger` implements the original NSLogger binary framing verbatim: `uint32 totalSize | uint16 partCount | parts…`, every multi-byte value big-endian. Part keys (`messageType`, `timestampS`, `tag`, `level`, `message`, `filename`, `lineNumber`, `functionName`, `clientInfo`, …) are modelled as typed Swift enums in `Sources/NeoLogger/Protocol/`.
 
-The encoder and decoder are pure value types, so the protocol can be reused in tests, file replay, custom transports — anywhere.
+The encoder and decoder are pure value types, so the protocol can be reused in tests, file replay, custom transports — anywhere. Decoded messages read back through typed accessors (`message.level`, `.tag`, `.text`, `.payload`, `.timestamp`, …).
 
 ## Testing
 
@@ -95,7 +99,7 @@ The encoder and decoder are pure value types, so the protocol can be reused in t
 swift test
 ```
 
-Fourteen tests cover the wire codec (roundtrip, framing, split streams, incomplete frames), the client actor through an in-process transport (ordering, drop-oldest buffering, requeue-on-failure, the flush contract), and the `NWTransport` adapter over local sockets (handshake-first, reconnection with handshake replay, delivery after a viewer drop).
+Twenty-three tests cover the wire codec (roundtrip, framing, split streams, oversized-frame rejection), typed Message reads, the client actor through an in-process transport (call-order guarantee, caller-thread labels, drop-oldest buffering, requeue-on-failure, the flush contract), the swift-log bridge, and `NWTransport` ↔ `NWMessageListener` over local sockets (handshake-first, reconnection with handshake replay, delivery after a viewer drop).
 
 ## Status
 

@@ -52,10 +52,10 @@ struct WireProtocolTests {
   func splitStream() throws {
     let m1 = Message.log(
       seq: 1, timestamp: Date(timeIntervalSince1970: 1_000), threadId: "t", domain: "A", level: 0,
-      text: "first")
+      payload: .text("first"))
     let m2 = Message.log(
       seq: 2, timestamp: Date(timeIntervalSince1970: 1_001), threadId: "t", domain: "B", level: 1,
-      text: "second")
+      payload: .text("second"))
     let wire = WireEncoder.encode(m1) + WireEncoder.encode(m2)
 
     var decoder = WireDecoder()
@@ -69,7 +69,7 @@ struct WireProtocolTests {
 
   @Test("Decoder returns nil when frame is incomplete")
   func incompleteFrame() throws {
-    let message = Message.log(seq: 1, threadId: "t", domain: "A", level: 0, text: "x")
+    let message = Message.log(seq: 1, threadId: "t", domain: "A", level: 0, payload: .text("x"))
     let wire = WireEncoder.encode(message)
 
     var decoder = WireDecoder()
@@ -78,6 +78,18 @@ struct WireProtocolTests {
 
     decoder.append(wire.suffix(1))
     #expect(try decoder.nextMessage() == message)
+  }
+
+  @Test("Decoder rejects an oversized frame announcement instead of buffering")
+  func frameTooLarge() {
+    var decoder = WireDecoder(maxFrameBytes: 1024)
+    var prefix = Data()
+    let huge = UInt32(4_000_000_000).bigEndian
+    withUnsafeBytes(of: huge) { prefix.append(contentsOf: $0) }
+    decoder.append(prefix)
+    #expect(throws: WireDecoder.DecodeError.self) {
+      try decoder.nextMessage()
+    }
   }
 
   @Test("Big-endian int encoding")

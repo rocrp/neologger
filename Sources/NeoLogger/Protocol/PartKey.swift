@@ -2,6 +2,9 @@ import Foundation
 
 /// Part key byte. Values < 100 are reserved; user defined keys start at 100.
 /// See NSLogger `LoggerCommon.h` for the canonical definitions.
+///
+/// Some cases (`timestampMs`) are wire-compat constants this client never
+/// produces but original NSLogger clients may send.
 public enum PartKey: UInt8, Sendable, Hashable {
   case messageType = 0
   case timestampS = 1
@@ -35,6 +38,9 @@ public enum PartType: UInt8, Sendable, Hashable {
   case image = 5
 }
 
+/// Message type constants. `blockStart`/`blockEnd`/`disconnect` are
+/// wire-compat constants this client never produces but original NSLogger
+/// clients may send.
 public enum MessageType: Int32, Sendable, Hashable {
   case log = 0
   case blockStart = 1

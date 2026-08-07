@@ -18,56 +18,40 @@ func eventually(
   throw TimedOut()
 }
 
-extension Message {
-  var text: String? {
-    for part in parts where part.key == PartKey.message.rawValue {
-      if case .string(let s) = part.value { return s }
-    }
-    return nil
-  }
-
-  var seq: Int32? {
-    for part in parts where part.key == PartKey.messageSeq.rawValue {
-      if case .int32(let v) = part.value { return v }
-    }
-    return nil
-  }
-
-  var isClientInfo: Bool {
-    for part in parts where part.key == PartKey.messageType.rawValue {
-      if case .int32(let v) = part.value { return v == MessageType.clientInfo.rawValue }
-    }
-    return false
-  }
-}
-
 actor Flag {
   private(set) var value = false
   func set() { value = true }
 }
 
-/// Wraps a continuation so racing callbacks can only resume it once.
-final class ResumeOnce<T: Sendable>: @unchecked Sendable {
-  private let lock = NSLock()
-  private var continuation: CheckedContinuation<T, Error>?
+/// Collects `NWMessageListener` events for assertions.
+actor ListenerEvents {
+  private var store: [Int: [Message]] = [:]
+  private var connected: [Int] = []
 
-  init(_ continuation: CheckedContinuation<T, Error>) {
-    self.continuation = continuation
+  func record(_ event: NWMessageListener.Event) {
+    switch event.kind {
+    case .connected:
+      connected.append(event.connection)
+      store[event.connection] = []
+    case .message(let message):
+      store[event.connection, default: []].append(message)
+    case .disconnected:
+      break
+    }
   }
 
-  func resume(returning value: T) {
-    take()?.resume(returning: value)
-  }
+  var connectionCount: Int { connected.count }
 
-  func resume(throwing error: Error) {
-    take()?.resume(throwing: error)
-  }
+  func messages(on id: Int) -> [Message] { store[id] ?? [] }
+}
 
-  private func take() -> CheckedContinuation<T, Error>? {
-    lock.lock()
-    defer { lock.unlock() }
-    let taken = continuation
-    continuation = nil
-    return taken
+/// Starts consuming the listener's event stream into a `ListenerEvents` log.
+func observe(_ listener: NWMessageListener) -> ListenerEvents {
+  let events = ListenerEvents()
+  Task {
+    for await event in listener.events {
+      await events.record(event)
+    }
   }
+  return events
 }

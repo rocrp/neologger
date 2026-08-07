@@ -17,14 +17,14 @@ let package = Package(
     .executable(name: "neo-logger-demo", targets: ["neo-logger-demo"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0")
+    // NeoLogHandler adopts the LogEvent-based handler API.
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0")
   ],
   targets: [
     .target(
       name: "NeoLogger",
       swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .enableUpcomingFeature("StrictConcurrency"),
+        .swiftLanguageMode(.v6)
       ]
     ),
     .target(
@@ -53,7 +53,11 @@ let package = Package(
     ),
     .testTarget(
       name: "NeoLoggerTests",
-      dependencies: ["NeoLogger"],
+      dependencies: [
+        "NeoLogger",
+        "NeoLoggerSwiftLog",
+        .product(name: "Logging", package: "swift-log"),
+      ],
       swiftSettings: [
         .swiftLanguageMode(.v6)
       ]

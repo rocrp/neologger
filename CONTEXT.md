@@ -12,6 +12,10 @@ _Avoid_: log entry, event
 One typed key/value pair inside a Message.
 _Avoid_: field, attribute
 
+**Payload**:
+The body of a log Message: text, binary data, or a PNG image.
+_Avoid_: content, body
+
 **Frame**:
 The NSLogger binary encoding of one Message on the wire.
 _Avoid_: packet, chunk

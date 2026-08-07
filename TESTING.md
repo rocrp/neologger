@@ -8,11 +8,13 @@ Three levels, pick whichever you need.
 swift test
 ```
 
-Covers:
+Covers (five suites):
 
-- **WireProtocolTests** — encode/decode roundtrip, big-endian framing, split byte streams, incomplete frames, `ClientInfo` builder.
-- **NeoLoggerActorTests** — the client actor through an in-process `RecordingTransport`: ordering + sequence, drop-oldest buffering (in-flight message never evicted), requeue when the transport throws, and `flush()` waiting for the in-flight ack.
-- **NWTransportTests** — the `NWTransport` adapter over loopback sockets on a system-assigned port: handshake precedes the first frame, reconnection replays the handshake after the viewer drops the connection, `flush()` through the real transport, and delivery of a single post-drop log on a fresh connection.
+- **WireProtocolTests** — encode/decode roundtrip, big-endian framing, split byte streams, incomplete frames, oversized-frame rejection, `ClientInfo` builder.
+- **MessageAccessorTests** — typed reads (`type`/`seq`/`level`/`tag`/`text`/`payload`/`timestamp`/…) and `Level.name`.
+- **NeoLoggerActorTests** — the client actor through an in-process `RecordingTransport`: call-order + contiguous sequence from sync call sites, caller-thread labels, drop-oldest buffering (in-flight message never evicted), requeue when the transport throws, `flush()` waiting for the in-flight ack, all seven severity shortcuts.
+- **NeoLogHandlerTests** — the swift-log bridge end to end (level mapping, label → tag, metadata rendering, threshold).
+- **NWTransportTests** — `NWTransport` ↔ `NWMessageListener` over loopback sockets on a system-assigned port: handshake precedes the first frame, reconnection replays the handshake after the viewer drops the connection, `flush()` through the real transport, and delivery of a single post-drop log on a fresh connection.
 
 No external processes needed. Runs in under a second on an M-series Mac.
 
@@ -21,7 +23,7 @@ No external processes needed. Runs in under a second on an M-series Mac.
 Terminal 1 — receiver:
 
 ```bash
-swift run neo-logger-viewer
+swift run neo-logger-viewer          # or: swift run neo-logger-viewer 50123
 # [viewer] listening on port 50000 (Bonjour: _nslogger._tcp)
 ```
 
@@ -41,15 +43,16 @@ swift run neo-logger-demo --forever
 Expected in terminal 1:
 
 ```
-[viewer] client XXXXXXXX connecting
-[XXXXXXXX] CLIENT neo-logger-demo
-[XXXXXXXX] IMPO  [App]     DemoCLI.swift:38 demo starting
-[XXXXXXXX] INFO  [Network] DemoCLI.swift:39 GET https://example.com → 200
-[XXXXXXXX] DEBUG [DB]      DemoCLI.swift:40 SELECT * FROM users WHERE id = 42
-[XXXXXXXX] WARN  [View]    DemoCLI.swift:41 tableView reload on background thread
-[XXXXXXXX] ERROR [App]     DemoCLI.swift:42 something went wrong: …
-[XXXXXXXX] VERB  [IO]      DemoCLI.swift:43 <binary 8 bytes>
-[XXXXXXXX] MARK demo mark
+[viewer] client #0 connected
+[#0] CLIENT neo-logger-demo
+[#0] IMPO  [App]     DemoCLI.swift:38 demo starting
+[#0] INFO  [Network] DemoCLI.swift:39 GET https://example.com → 200
+[#0] DEBUG [DB]      DemoCLI.swift:40 SELECT * FROM users WHERE id = 42
+[#0] WARN  [View]    DemoCLI.swift:41 tableView reload on background thread
+[#0] ERROR [App]     DemoCLI.swift:42 something went wrong: …
+[#0] VERB  [IO]      DemoCLI.swift:43 <binary 8 bytes>
+[#0] MARK demo mark
+[viewer] client #0 closed
 ```
 
 If nothing arrives, check:
@@ -73,9 +76,7 @@ Add NeoLogger as an SPM dependency, then:
 ```swift
 import NeoLogger
 
-await NeoLogger.shared.log(.network, .info, "hello from my app")
-// or, from sync code:
-NeoLog.info(.network, "hello from my app")
+NeoLog.info(.network, "hello from my app")  // synchronous, works anywhere
 ```
 
 With `neo-logger-viewer` (or `NSLogger.app`) running on the same network, logs appear immediately. On iOS 14+ add to Info.plist so the OS allows local-network access:
